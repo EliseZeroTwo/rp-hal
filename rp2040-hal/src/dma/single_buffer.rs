@@ -112,4 +112,35 @@ where
 
         (self.ch, self.from, self.to)
     }
+
+    /// Aborts the current transfer, returning the channel and targets
+    pub fn abort(mut self) -> (CH, FROM, TO) {
+        let irq0_was_enabled = self.ch.is_enabled_irq0();
+        let irq1_was_enabled = self.ch.is_enabled_irq1();
+        self.ch.disable_irq0();
+        self.ch.disable_irq1();
+
+        unsafe { &*crate::pac::DMA::ptr() }.chan_abort().write(|w| unsafe { w.bits(1 << self.ch.id() as u32)});
+
+        while unsafe { &*crate::pac::DMA::ptr() }.chan_abort().read().bits() != 0 {}
+
+        while !self.is_done() {};
+
+        self.ch.check_irq0();
+        self.ch.check_irq1();
+
+        if irq0_was_enabled {
+            self.ch.enable_irq0();
+        }
+
+        if irq1_was_enabled {
+            self.ch.enable_irq1();
+        }
+
+        // Make sure that memory contents reflect what the user intended.
+        cortex_m::asm::dsb();
+        compiler_fence(Ordering::SeqCst);
+
+        (self.ch, self.from, self.to)
+    }
 }
